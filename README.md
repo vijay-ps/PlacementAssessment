@@ -116,15 +116,20 @@ src/
 
 ---
 
-## ⚖️ Engineering Tradeoffs
+## ⚖️ Engineering Tradeoffs & Future Enhancements
 
 ### 1. Database Locking vs. Redis Distributed Locks
-*   **Tradeoff**: Using PostgreSQL `SELECT FOR UPDATE` places locking overhead directly on the relational database. A distributed lock system (e.g. Redlock with Redis) offloads locking from the DB.
-*   **Decision**: For a typical take-home and high-integrity platform, PostgreSQL row-level locks are preferred due to **simplicity, transactional integrity (ACID)**, and lack of secondary state sync issues. It ensures that locks cannot become stale if a server crashes, since the DB automatically drops session locks upon connection loss.
+*   **Tradeoff**: Using PostgreSQL `SELECT FOR UPDATE` places locking overhead directly on the relational database. A distributed lock system (e.g., Redlock with Redis) offloads locking from the DB to an in-memory cache layer.
+*   **Decision**: For absolute transactional consistency and correctness, PostgreSQL row-level locks were chosen. They provide out-of-the-box ACID guarantees without requiring double-writes or distributed state synchronization. Additionally, if an application server crashes, PostgreSQL automatically releases the row lock when the TCP connection closes, preventing permanently orphaned lock states.
 
 ### 2. Lazy Cleanup vs. Active Cron Workers
-*   **Tradeoff**: Active workers require additional infrastructure (Redis, worker threads, cron runtimes). Lazy cleanup relies on user traffic to trigger releases.
-*   **Decision**: Lazy cleanup is incredibly elegant, simple, and self-cleaning. However, it means stock is only returned when *some* request touches the endpoints. To bridge the gap, the GET `/api/products` catalog endpoint triggers cleanup, ensuring customers always see fresh, accurate stock levels.
+*   **Tradeoff**: Active background cron jobs require separate infrastructure and runtime dependencies (e.g., Redis, BullMQ, or continuous serverless schedulers). Lazy cleanup processes expirations on-demand when users fetch lists or request checkouts.
+*   **Decision**: Lazy cleanup is self-cleaning, cost-effective, and highly scalable. To ensure stock level freshness even during low-traffic periods, catalog fetch routes (`GET /api/products`) automatically trigger lazy expiration sweeps. This ensures users always see accurate stock metrics without needing continuous cron resources.
+
+### 3. What We Would Do Differently With More Time
+*   **Hybrid Optimistic/Pessimistic Locking**: For standard inventory items with low purchase contention, we would implement **Optimistic Concurrency Control (OCC)** using a version-check column. This would allow lock-free reads and updates, falling back to pessimistic `SELECT FOR UPDATE` locking *only* for high-demand, limited-edition flash sales.
+*   **Outbox Pattern & Event Queues**: Instead of handling payment and fulfillment confirmations synchronously in the route handlers, we would emit events to a message queue (like RabbitMQ or Apache Kafka) using the Transactional Outbox Pattern, decoupling checkout state changes from downstream shipping systems and improving horizontal write scalability.
+*   **Dedicated Cron Sweep Supplement**: For enterprise-grade scaling, we would supplement the lazy cleanup engine with a 1-minute serverless Cron trigger (e.g., **Vercel Cron** or **AWS EventBridge**) to ensure prompt expiration releases during dead hours with zero customer request overhead.
 
 ---
 
