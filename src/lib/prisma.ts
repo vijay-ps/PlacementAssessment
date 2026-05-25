@@ -40,7 +40,7 @@ const pool = new Pool({
   connectionString,
   max: 15, // Concurrency connection limit
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 15000, // Increased to 15s to tolerate remote AWS/Neon cold starts and network latency
 });
 
 const adapter = new PrismaPg(pool);
